@@ -1502,7 +1502,7 @@ export const defaultConfig = Object.freeze({
       static: 300,
     },
     allowDevelopmentBuild: undefined,
-    reactCompiler: undefined,
+    reactCompiler: true,
     reactDebugChannel: false,
     staticGenerationRetryCount: undefined,
     serverComponentsHmrCache: true,
