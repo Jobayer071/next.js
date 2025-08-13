@@ -320,6 +320,7 @@ jobs:
         npm i -g vercel@latest
         node run-tests.js --timings -g ${{ matrix.group }} -c 2 --type e2e
       stepName: 'test-turbopack-production-react-${{ matrix.react }}-${{ matrix.group }}'
+      timeout_minutes: 60
     secrets: inherit
 
   test-turbopack-production-integration:
