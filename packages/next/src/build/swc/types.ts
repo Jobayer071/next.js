@@ -222,7 +222,7 @@ export interface Project {
 
   writeAllEntrypointsToDisk(
     appDirOnly: boolean
-  ): Promise<TurbopackResult<RawEntrypoints>>
+  ): Promise<TurbopackResult<RawEntrypoints | {}>>
 
   entrypointsSubscribe(): AsyncIterableIterator<TurbopackResult<RawEntrypoints>>
 

@@ -69,7 +69,7 @@ use crate::{
         },
         utils::{
             DetachedVc, NapiDiagnostic, NapiIssue, RootTask, TurbopackResult, get_diagnostics,
-            get_issues, subscribe,
+            get_issues, strongly_consistent_catch_collectables, subscribe,
         },
     },
     util::DhatProfilerGuard,
@@ -868,7 +868,7 @@ fn project_container_entrypoints_operation(
 
 #[turbo_tasks::value(serialization = "none")]
 struct AllWrittenEntrypointsWithIssues {
-    entrypoints: Option<ReadRef<Entrypoints>>,
+    entrypoints: Option<ReadRef<EntrypointsOperation>>,
     issues: Arc<Vec<ReadRef<PlainIssue>>>,
     diagnostics: Arc<Vec<ReadRef<PlainDiagnostic>>>,
     effects: Arc<Effects>,
@@ -878,7 +878,7 @@ struct AllWrittenEntrypointsWithIssues {
 pub async fn project_write_all_entrypoints_to_disk(
     #[napi(ts_arg_type = "{ __napiType: \"Project\" }")] project: External<ProjectInstance>,
     app_dir_only: bool,
-) -> napi::Result<TurbopackResult<NapiEntrypoints>> {
+) -> napi::Result<TurbopackResult<Option<NapiEntrypoints>>> {
     let ctx = &project.turbopack_ctx;
     let container = project.container;
     let tt = ctx.turbo_tasks();
@@ -890,7 +890,7 @@ pub async fn project_write_all_entrypoints_to_disk(
                 get_all_written_entrypoints_with_issues_operation(container, app_dir_only);
 
             // Read and compile the files
-            let EntrypointsWithIssues {
+            let AllWrittenEntrypointsWithIssues {
                 entrypoints,
                 issues,
                 diagnostics,
@@ -917,7 +917,14 @@ pub async fn project_write_all_entrypoints_to_disk(
         .await?;
 
     Ok(TurbopackResult {
-        result: NapiEntrypoints::from_entrypoints_op(&entrypoints, &project.turbopack_ctx)?,
+        result: if let Some(entrypoints) = entrypoints {
+            Some(NapiEntrypoints::from_entrypoints_op(
+                &entrypoints,
+                &project.turbopack_ctx,
+            )?)
+        } else {
+            None
+        },
         issues: issues.iter().map(|i| NapiIssue::from(&**i)).collect(),
         diagnostics: diags.iter().map(|d| NapiDiagnostic::from(d)).collect(),
     })
@@ -927,16 +934,14 @@ pub async fn project_write_all_entrypoints_to_disk(
 async fn get_all_written_entrypoints_with_issues_operation(
     container: ResolvedVc<ProjectContainer>,
     app_dir_only: bool,
-) -> Result<Vc<EntrypointsWithIssues>> {
+) -> Result<Vc<AllWrittenEntrypointsWithIssues>> {
     let entrypoints_operation = EntrypointsOperation::new(all_entrypoints_write_to_disk_operation(
         container,
         app_dir_only,
     ));
-    let entrypoints = entrypoints_operation.read_strongly_consistent().await?;
-    let issues = get_issues(entrypoints_operation).await?;
-    let diagnostics = get_diagnostics(entrypoints_operation).await?;
-    let effects = Arc::new(get_effects(entrypoints_operation).await?);
-    Ok(EntrypointsWithIssues {
+    let (entrypoints, issues, diagnostics, effects) =
+        strongly_consistent_catch_collectables(entrypoints_operation).await?;
+    Ok(AllWrittenEntrypointsWithIssues {
         entrypoints,
         issues,
         diagnostics,
