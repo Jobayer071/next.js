@@ -47,11 +47,7 @@ import {
 } from '../../server/response-cache'
 import { FallbackMode, parseFallbackField } from '../../lib/fallback'
 import RenderResult from '../../server/render-result'
-import {
-  CACHE_ONE_YEAR,
-  HTML_CONTENT_TYPE_HEADER,
-  NEXT_CACHE_TAGS_HEADER,
-} from '../../lib/constants'
+import { CACHE_ONE_YEAR, NEXT_CACHE_TAGS_HEADER } from '../../lib/constants'
 import type { CacheControl } from '../../server/lib/cache-control'
 import { ENCODED_TAGS } from '../../server/stream-utils/encoded-tags'
 import { sendRenderResult } from '../../server/send-payload'
@@ -1213,19 +1209,22 @@ export async function handler(
         res.setHeader(NEXT_DID_POSTPONE_HEADER, '1')
       }
 
-      // we don't go through this block when preview mode is true
-      // as preview mode is a dynamic request (bypasses cache) and doesn't
-      // generate both HTML and payloads in the same request so continue to just
-      // return the generated payload
-      if (isRSCRequest && !isDraftMode) {
+      // NOTE: We previously excluded requests that were in draft mode because
+      // the logic here used to also serve pages router data requests. Now that
+      // this only serves app router data requests, the error branches within
+      // this block are appropriately gated. The only error conditions that are
+      // possible are if the response truly wasn't an RSC response.
+      if (isRSCRequest) {
         // If this is a dynamic RSC request, then stream the response.
         if (typeof cachedData.rscData === 'undefined') {
           // If the response is not an RSC response, then we can't serve it.
           if (cachedData.html.contentType !== RSC_CONTENT_TYPE_HEADER) {
+            // TODO: (wyattjoh) this may an unreachable branch, see if we can remove this
             if (nextConfig.experimental.clientParamParsing) {
-              // If client param parsing is enabled, then we can return a 404.
-              // This was likely an old prefetch request.
-              res.statusCode = 404
+              // If client param parsing is enabled, then we can return a 422.
+              // This was likely an old prefetch request which we don't return
+              // anymore with the client param parsing enabled.
+              res.statusCode = 422
               return sendRenderResult({
                 req,
                 res,
@@ -1273,7 +1272,11 @@ export async function handler(
       // If there's no postponed state, we should just serve the HTML. This
       // should also be the case for a resume request because it's completed
       // as a server render (rather than a static render).
-      if (!didPostpone || minimalMode || isRSCRequest) {
+      //
+      // If we're in this block, and we're also in minimal mode, we don't have a
+      // two phase render and should just respond with the result from the cache
+      // handler.
+      if (!didPostpone || minimalMode) {
         // If we're in test mode, we should add a sentinel chunk to the response
         // that's between the static and dynamic parts so we can compare the
         // chunks and add assertions.
@@ -1281,7 +1284,12 @@ export async function handler(
           process.env.__NEXT_TEST_MODE &&
           minimalMode &&
           isRoutePPREnabled &&
-          body.contentType === HTML_CONTENT_TYPE_HEADER
+          // If the request was not initiated with a postponed state to resume
+          // with, then the response itself isn't a PPR response, and instead is
+          // just a full SSR response. We don't write the sentinel to indicate
+          // that this did not go through the regular PPR flow, and instead was
+          // rendered dynamically.
+          minimalPostponed
         ) {
           // As we're in minimal mode, the static part would have already been
           // streamed first. The only part that this streams is the dynamic part
