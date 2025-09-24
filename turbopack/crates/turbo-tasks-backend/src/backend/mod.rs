@@ -1754,18 +1754,17 @@ impl<B: BackingStorage> TurboTasksBackendInner<B> {
         // suspend in `CleanupOldEdgesOperation`), but that's ok as the task is still dirty and
         // would be executed again.
 
-        if self.task_execution_completed_connect(
-            &mut ctx,
-            task_id,
-            new_children,
-            has_children,
-            is_now_immutable,
-        ) {
+        if has_children && self.task_execution_completed_connect(&mut ctx, task_id, new_children) {
             // Task was stale and has been rescheduled
             return true;
         }
 
-        if self.task_execution_completed_finish(&mut ctx, task_id, &mut removed_data) {
+        if self.task_execution_completed_finish(
+            &mut ctx,
+            task_id,
+            &mut removed_data,
+            is_now_immutable,
+        ) {
             // Task was stale and has been rescheduled
             return true;
         }
@@ -2007,9 +2006,9 @@ impl<B: BackingStorage> TurboTasksBackendInner<B> {
         ctx: &mut impl ExecuteContext<'_>,
         task_id: TaskId,
         new_children: FxHashSet<TaskId>,
-        has_children: bool,
-        is_now_immutable: bool,
     ) -> bool {
+        debug_assert!(!new_children.is_empty());
+
         let mut task = ctx.task(task_id, TaskDataCategory::All);
         let Some(in_progress) = get!(task, InProgress) else {
             panic!("Task execution completed, but task is not in progress: {task:#?}");
@@ -2050,34 +2049,16 @@ impl<B: BackingStorage> TurboTasksBackendInner<B> {
             return true;
         }
 
-        // If the task is not stateful and has no mutable children, it does not have a way to be
-        // invalidated and we can mark it as immutable.
-        if is_now_immutable {
-            let _ = task.add(CachedDataItem::Immutable { value: () });
-        }
-
-        let mut queue = AggregationUpdateQueue::new();
-
-        if has_children {
-            let has_active_count = ctx.should_track_activeness()
-                && get!(task, Activeness).map_or(false, |activeness| activeness.active_counter > 0);
-            connect_children(
-                task_id,
-                &mut task,
-                new_children,
-                &mut queue,
-                has_active_count,
-                ctx.should_track_activeness(),
-            );
-        }
-
-        drop(task);
-
-        if has_children {
-            #[cfg(feature = "trace_task_completion")]
-            let _span = tracing::trace_span!("connect new children").entered();
-            queue.execute(ctx);
-        }
+        let has_active_count = ctx.should_track_activeness()
+            && get!(task, Activeness).map_or(false, |activeness| activeness.active_counter > 0);
+        connect_children(
+            ctx,
+            task_id,
+            task,
+            new_children,
+            has_active_count,
+            ctx.should_track_activeness(),
+        );
 
         false
     }
@@ -2087,6 +2068,7 @@ impl<B: BackingStorage> TurboTasksBackendInner<B> {
         ctx: &mut impl ExecuteContext<'_>,
         task_id: TaskId,
         removed_data: &mut Vec<CachedDataItem>,
+        is_now_immutable: bool,
     ) -> bool {
         let mut task = ctx.task(task_id, TaskDataCategory::All);
         let Some(in_progress) = remove!(task, InProgress) else {
@@ -2115,6 +2097,12 @@ impl<B: BackingStorage> TurboTasksBackendInner<B> {
                 },
             });
             return true;
+        }
+
+        // If the task is not stateful and has no mutable children, it does not have a way to be
+        // invalidated and we can mark it as immutable.
+        if is_now_immutable {
+            let _ = task.add(CachedDataItem::Immutable { value: () });
         }
 
         // Notify in progress cells
