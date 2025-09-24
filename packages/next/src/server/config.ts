@@ -99,6 +99,19 @@ function checkDeprecations(
 ) {
   warnOptionHasBeenDeprecated(
     userConfig,
+    'publicRuntimeConfig',
+    `Runtime config is deprecated and the \`publicRuntimeConfig\` configuration option will be removed in Next.js 16.`,
+    silent
+  )
+  warnOptionHasBeenDeprecated(
+    userConfig,
+    'serverRuntimeConfig',
+    `Runtime config is deprecated and the \`serverRuntimeConfig\` configuration option will be removed in Next.js 16.`,
+    silent
+  )
+
+  warnOptionHasBeenDeprecated(
+    userConfig,
     'amp',
     `Built-in amp support is deprecated and the \`amp\` configuration option will be removed in Next.js 16.`,
     silent
