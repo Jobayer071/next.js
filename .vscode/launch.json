@@ -26,6 +26,9 @@
     }
   ],
   "configurations": [
+    _N_E
+    
+    app
     {
       "name": "Launch app",
       "type": "node",
